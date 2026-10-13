@@ -70,7 +70,7 @@ class ScriptServices implements RpcController {
 
             this.#pendingRequests.set(id, complete);
 
-            this.#script.post(["frida:rpc", id, operation, ...params], data);
+            this.#script.post(["meshlink:rpc", id, operation, ...params], data);
             this.#script.destroyed.connect(onScriptDestroyed);
             if (cancellable !== null) {
                 cancellable.cancelled.connect(onOperationCancelled);
@@ -208,7 +208,7 @@ function isRpcSendMessage(message: SendMessage): boolean {
         return false;
     }
 
-    return payload[0] === "frida:rpc";
+    return payload[0] === "meshlink:rpc";
 }
 
 function isLogMessage(message: Message): boolean {
