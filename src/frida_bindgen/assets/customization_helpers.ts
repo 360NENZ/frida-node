@@ -16,8 +16,7 @@ class ScriptServices implements RpcController {
     exportsProxy = new ScriptExportsProxy(this);
 
     #script: Script;
-    #pendingRequests = new Map<number, (error: Error | null, result?: any) => void>();
-    #nextRequestId = 1;
+    #pendingRequests = new Map<string, (error: Error | null, result?: any) => void>();
 
     constructor(script: Script) {
         this.#script = script;
@@ -27,8 +26,8 @@ class ScriptServices implements RpcController {
     }
 
     handleMessageIntercept = (message: Message, data: Buffer | null): boolean => {
-        if (message.type === MessageType.Send && isRpcSendMessage(message)) {
-            const [ , id, operation, ...params ] = message.payload;
+        if (message.type === MessageType.Send && isRpcSendMessage(message, this.#pendingRequests)) {
+            const [ id, operation, ...params ] = message.payload;
             this.#onRpcMessage(id, operation, params, data);
             return false;
         } else if (isLogMessage(message)) {
@@ -43,7 +42,7 @@ class ScriptServices implements RpcController {
 
     request(operation: string, params: any[], data: Buffer | null, cancellable: Cancellable | null = null): Promise<any> {
         return new Promise((resolve, reject) => {
-            const id = this.#nextRequestId++;
+            const id = randomUUID();
 
             const complete = (error: Error | null, result?: any): void => {
                 if (cancellable !== null) {
@@ -70,7 +69,7 @@ class ScriptServices implements RpcController {
 
             this.#pendingRequests.set(id, complete);
 
-            this.#script.post(["meshlink:rpc", id, operation, ...params], data);
+            this.#script.post([id, operation, ...params], data);
             this.#script.destroyed.connect(onScriptDestroyed);
             if (cancellable !== null) {
                 cancellable.cancelled.connect(onOperationCancelled);
@@ -85,7 +84,7 @@ class ScriptServices implements RpcController {
         });
     }
 
-    #onRpcMessage(id: number, operation: RpcOperation, params: any[], data: Buffer | null) {
+    #onRpcMessage(id: string, operation: RpcOperation, params: any[], data: Buffer | null) {
         if (operation === RpcOperation.Ok || operation === RpcOperation.Error) {
             const callback = this.#pendingRequests.get(id);
             if (callback === undefined) {
@@ -202,13 +201,15 @@ function isRpcMessage(message: Message): boolean {
     return message.type === MessageType.Send && isRpcSendMessage(message);
 }
 
-function isRpcSendMessage(message: SendMessage): boolean {
+function isRpcSendMessage(message: SendMessage, pending?: Map<string, unknown>): boolean {
     const payload = message.payload;
-    if (!Array.isArray(payload)) {
+    if (!Array.isArray(payload) || payload.length < 3) {
         return false;
     }
 
-    return payload[0] === "meshlink:rpc";
+    return typeof payload[0] === "string" &&
+        (payload[1] === RpcOperation.Ok || payload[1] === RpcOperation.Error) &&
+        (pending === undefined || pending.has(payload[0]));
 }
 
 function isLogMessage(message: Message): boolean {
